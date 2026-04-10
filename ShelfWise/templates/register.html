@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Create Account – ShelfWise</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body class="auth-page">
+  <div class="auth-box">
+    <h1 class="auth-heading">Create Account</h1>
+    <p class="auth-subheading">Sign up to start getting personalised book recommendations.</p>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="auth-flash-wrap">
+          {% for category, msg in messages %}
+            <div class="auth-flash auth-flash-{{ category }}">{{ msg }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    <form method="POST" class="auth-form" novalidate>
+
+      <label class="auth-label" for="name">Name</label>
+      <input class="auth-input" id="name" name="name" type="text"
+             placeholder="Your name" value="{{ name }}"
+             autocomplete="name" required />
+      {% if errors.get("name") %}
+        <div class="auth-error">{{ errors.get("name") }}</div>
+      {% endif %}
+
+      <label class="auth-label" for="email">Email</label>
+      <input class="auth-input" id="email" name="email" type="email"
+             placeholder="you@example.com" value="{{ email }}"
+             autocomplete="email" required />
+      {% if errors.get("email") %}
+        <div class="auth-error">{{ errors.get("email") }}</div>
+      {% endif %}
+
+      <label class="auth-label" for="password">Password</label>
+      <input class="auth-input" id="password" name="password" type="password"
+             placeholder="Minimum 6 characters"
+             autocomplete="new-password" required />
+      {% if errors.get("password") %}
+        <div class="auth-error">{{ errors.get("password") }}</div>
+      {% endif %}
+
+      <button class="auth-btn" type="submit">Create Account</button>
+    </form>
+
+    <div class="auth-footer">
+      <span>Already have an account?</span>
+      <a class="auth-link" href="{{ url_for('login') }}">Log in</a>
+    </div>
+  </div>
+</body>
+</html>

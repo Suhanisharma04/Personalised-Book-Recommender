@@ -1,0 +1,540 @@
+<!doctype html>
+<html lang="en" data-theme="pink">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>ShelfWise</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="app-page">
+
+<header class="topbar">
+  <div class="brand">
+    <div class="brand-mark">📚</div>
+    <div class="brand-text">
+      <div class="brand-title">ShelfWise</div>
+      <div class="brand-subtitle">Personalised Book Recommender</div>
+    </div>
+  </div>
+  <div class="topbar-actions">
+    <button class="icon-btn" id="themeToggle" aria-label="Toggle theme"><span class="icon">🌙</span></button>
+    <a class="btn btn-ghost btn-small" href="{{ url_for('favourites') }}">❤️ Favourites</a>
+    <div class="user-chip">
+      <span class="user-dot"></span>
+      <span class="user-text">{{ user_email }}</span>
+    </div>
+    <a class="btn btn-small" href="{{ url_for('logout') }}">Logout</a>
+  </div>
+</header>
+
+<main class="container">
+
+  <!-- search -->
+  <section class="hero">
+    <h1 class="hero-title"><span id="welcomeText">Welcome back, {{ user_name }}!</span></h1>
+    <p class="hero-subtitle">Enter any book title — fiction, tech, history, anything — to find similar reads.</p>
+
+    <form id="searchForm" method="POST" action="{{ url_for('dashboard') }}" novalidate autocomplete="off">
+      <div class="search-row" style="position:relative;">
+        <input class="search-input" type="text" name="title" id="searchInput"
+               value="{{ query or '' }}" placeholder="e.g. Atomic Habits" required/>
+        <button type="submit" class="btn">Recommend</button>
+        <ul class="suggestions-dropdown" id="suggestionsDropdown"></ul>
+      </div>
+
+      {% if error %}<div class="inline-error">{{ error }}</div>{% endif %}
+
+      {% if matched_title %}
+      <div class="match-row">
+        <div class="match-pill">Matched: <b>{{ matched_title }}</b>{% if matched_author %} by {{ matched_author }}{% endif %}</div>
+      </div>
+      {% endif %}
+    </form>
+  </section>
+
+  <!-- mood picks -->
+  <section class="mood">
+    <div class="mood-head">
+      <h2 class="section-title">Mood picks</h2>
+      <span class="muted">Browse by mood instead of a title</span>
+    </div>
+    <div class="mood-grid">
+      <button class="mood-card" type="button" data-mood="inspired">
+        <div class="mood-ico">✨</div>
+        <div class="mood-txt"><div class="mood-title">Feeling inspired?</div><div class="mood-sub">Uplifting &amp; meaningful reads</div></div>
+      </button>
+      <button class="mood-card" type="button" data-mood="mystery">
+        <div class="mood-ico">🕵️</div>
+        <div class="mood-txt"><div class="mood-title">Need a mystery?</div><div class="mood-sub">Twists, suspense, page-turners</div></div>
+      </button>
+      <button class="mood-card" type="button" data-mood="learn">
+        <div class="mood-ico">🧠</div>
+        <div class="mood-txt"><div class="mood-title">Learn something</div><div class="mood-sub">Non-fiction &amp; educational reads</div></div>
+      </button>
+      <button class="mood-card" type="button" data-mood="romance">
+        <div class="mood-ico">💕</div>
+        <div class="mood-txt"><div class="mood-title">Romance</div><div class="mood-sub">Love stories &amp; heartfelt reads</div></div>
+      </button>
+      <button class="mood-card" type="button" data-mood="fantasy">
+        <div class="mood-ico">🧙</div>
+        <div class="mood-txt"><div class="mood-title">Fantasy</div><div class="mood-sub">Magic, worlds &amp; epic adventures</div></div>
+      </button>
+      <button class="mood-card" type="button" data-mood="scifi">
+        <div class="mood-ico">🚀</div>
+        <div class="mood-txt"><div class="mood-title">Sci-Fi</div><div class="mood-sub">Space, future &amp; technology</div></div>
+      </button>
+      <button class="mood-card" type="button" data-mood="thriller">
+        <div class="mood-ico">⚡</div>
+        <div class="mood-txt"><div class="mood-title">Thriller</div><div class="mood-sub">Crime, danger &amp; suspense</div></div>
+      </button>
+      <button class="mood-card" type="button" data-mood="history">
+        <div class="mood-ico">🏛️</div>
+        <div class="mood-txt"><div class="mood-title">History</div><div class="mood-sub">True stories from the past</div></div>
+      </button>
+      <button class="mood-card" type="button" data-mood="horror">
+        <div class="mood-ico">👻</div>
+        <div class="mood-txt"><div class="mood-title">Horror</div><div class="mood-sub">Dark, chilling &amp; supernatural</div></div>
+      </button>
+      <button class="mood-card" type="button" data-mood="adventure">
+        <div class="mood-ico">🗺️</div>
+        <div class="mood-txt"><div class="mood-title">Adventure</div><div class="mood-sub">Action, travel &amp; exploration</div></div>
+      </button>
+      <button class="mood-card" type="button" data-mood="selfhelp">
+        <div class="mood-ico">🌱</div>
+        <div class="mood-txt"><div class="mood-title">Self-Help</div><div class="mood-sub">Growth, habits &amp; mindset</div></div>
+      </button>
+    </div>
+  </section>
+
+  <!-- results -->
+  <section class="results">
+    <div class="results-head">
+      <h2 class="section-title">Recommended for you</h2>
+    </div>
+    <div id="statusRow"></div>
+    <div class="loading" id="loadingRow" style="display:none;">
+      <div class="spinner"></div><div class="muted">Fetching recommendations...</div>
+    </div>
+
+    <div class="book-grid" id="bookGrid">
+      {% if recs %}
+        {% for r in recs %}
+          {% set isbn = r.get("ISBN","") %}
+          {% set ud   = user_data.get(isbn, {}) %}
+          <article class="book-card {% if ud.get('already_read') %}already-read{% endif %}"
+                   data-isbn="{{ isbn }}"
+                   data-title="{{ r.get('Book-Title','') }}"
+                   data-author="{{ r.get('Book-Author','') }}"
+                   data-buy="{{ r.get('buy_link','') }}">
+            <div class="cover-wrap">
+              {% if r.get("cover_url") %}
+                <img class="cover-img" src="{{ r.cover_url }}" alt="{{ r.get('Book-Title','') }}" loading="lazy"/>
+              {% else %}
+                <div class="cover">
+                  <div class="cover-title">{{ r.get("Book-Title","") }}</div>
+                  <div class="cover-author">{{ r.get("Book-Author","") }}</div>
+                </div>
+              {% endif %}
+              {% if ud.get("already_read") %}<div class="read-badge">✓ Read</div>{% endif %}
+              <button class="heart-btn" type="button" aria-label="Save to favourites">
+                <svg class="heart" viewBox="0 0 24 24">
+                  <path d="M12 21s-7.5-4.6-10-9C-0.6 7.2 2.4 3.5 6.5 4.1c1.7.2 3.1 1.3 3.9 2.6.8-1.3 2.2-2.4 3.9-2.6 4.1-.6 7.1 3.1 4.5 7.9-2.5 4.4-10 9-10 9z"/>
+                </svg>
+              </button>
+            </div>
+            <div class="book-meta">
+              <h3 class="book-title">{{ r.get("Book-Title","") }}</h3>
+              <p class="book-author">{{ r.get("Book-Author","") }}</p>
+              <div class="book-stats">
+                {% if r.get("genre") %}<span class="stat">🏷 {{ r.get("genre") }}</span>{% endif %}
+                {% if r.get("ratings_mean") is not none %}<span class="stat">⭐ {{ r.get("ratings_mean") }}</span>{% endif %}
+                {% if r.get("published_year") %}<span class="stat">📅 {{ r.get("published_year") }}</span>{% endif %}
+              </div>
+              <div class="star-row" data-isbn="{{ isbn }}">
+                {% for i in range(1,6) %}
+                  <button class="star-btn {% if i <= ud.get('rating',0) %}filled{% endif %}"
+                          data-val="{{ i }}" type="button">★</button>
+                {% endfor %}
+              </div>
+              <div class="card-actions">
+                <button class="card-btn detail-btn" type="button"
+                        data-title="{{ r.get('Book-Title','') }}"
+                        data-author="{{ r.get('Book-Author','') }}"
+                        data-isbn="{{ isbn }}">🔍 Details</button>
+                <button class="card-btn read-btn {% if ud.get('already_read') %}active{% endif %}"
+                        type="button" data-isbn="{{ isbn }}"
+                        data-title="{{ r.get('Book-Title','') }}"
+                        data-author="{{ r.get('Book-Author','') }}">
+                  {% if ud.get("already_read") %}✓ Read{% else %}Mark Read{% endif %}
+                </button>
+                {% if r.get("buy_link") %}
+                  <a class="card-btn buy-btn" href="{{ r.get('buy_link') }}" target="_blank" rel="noopener">🛒 Amazon</a>
+                {% endif %}
+                {% if r.get("google_link") %}
+                  <a class="card-btn" href="{{ r.get('google_link') }}" target="_blank" rel="noopener">📖 Google Books</a>
+                {% endif %}
+              </div>
+            </div>
+          </article>
+        {% endfor %}
+      {% endif %}
+    </div>
+
+    <div class="empty-state" id="emptyState" {% if recs %}style="display:none;"{% endif %}>
+      <div class="empty-ico">🌸</div>
+      <div class="empty-title">No recommendations yet</div>
+      <div class="empty-sub">Search a title above or pick a mood to get started.</div>
+    </div>
+  </section>
+</main>
+
+<footer class="footer">
+  <div class="footer-inner">
+<div class="footer-left"><b>ShelfWise</b> · Built with Flask · Powered by Google Books API</div>  </div>
+</footer>
+
+<!-- book detail modal -->
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal">
+    <button class="modal-close" id="modalClose">✕</button>
+    <div class="modal-body" id="modalBody"><div class="muted">Loading...</div></div>
+  </div>
+</div>
+
+<script>
+// ── theme toggle ──────────────────────────────────────────────────────────────
+const themeKey = "theme::{{ user_email }}";
+const favKey   = "faves::{{ user_email }}";
+const root     = document.documentElement;
+const toggle   = document.getElementById("themeToggle");
+
+function applyTheme(t) {
+  root.setAttribute("data-theme", t);
+  toggle.querySelector(".icon").textContent = t === "night" ? "☀️" : "🌙";
+}
+applyTheme(localStorage.getItem(themeKey) || "pink");
+toggle.addEventListener("click", () => {
+  const next = root.getAttribute("data-theme") === "pink" ? "night" : "pink";
+  localStorage.setItem(themeKey, next);
+  applyTheme(next);
+});
+
+// welcome pop animation
+const wt = document.getElementById("welcomeText");
+if (wt) { wt.classList.add("type-pop"); setTimeout(() => wt.classList.remove("type-pop"), 1200); }
+
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, m =>
+    ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
+}
+
+// ── favourites (localStorage) ─────────────────────────────────────────────────
+function getFaves() { try { return JSON.parse(localStorage.getItem(favKey) || "[]"); } catch { return []; } }
+function setFaves(list) { localStorage.setItem(favKey, JSON.stringify(list)); }
+function isFaved(isbn, title) {
+  const faves = getFaves();
+  if (isbn) return faves.some(b => b.isbn === isbn);
+  return faves.some(b => b.title === title);
+}
+function syncHearts() {
+  document.querySelectorAll(".book-card").forEach(card => {
+    card.classList.toggle("faved", isFaved(card.dataset.isbn, card.dataset.title));
+  });
+}
+document.addEventListener("click", e => {
+  const btn  = e.target.closest(".heart-btn");
+  const card = btn?.closest(".book-card");
+  if (!btn || !card) return;
+  const { isbn, title, author } = card.dataset;
+  const key = isbn || title;
+  if (!key) return;
+  let faves = getFaves();
+  const idx = faves.findIndex(b => (b.isbn && b.isbn === isbn) || (!isbn && b.title === title));
+  if (idx >= 0) faves.splice(idx, 1);
+  else faves.unshift({ isbn, title, author, savedAt: new Date().toISOString() });
+  setFaves(faves);
+  syncHearts();
+});
+syncHearts();
+
+// ── search suggestions ────────────────────────────────────────────────────────
+const searchInput = document.getElementById("searchInput");
+const dropdown    = document.getElementById("suggestionsDropdown");
+let timer = null;
+searchInput.addEventListener("input", () => {
+  clearTimeout(timer);
+  const q = searchInput.value.trim();
+  if (q.length < 2) { dropdown.innerHTML = ""; dropdown.style.display = "none"; return; }
+  timer = setTimeout(async () => {
+    try {
+      const list = await fetch(`/api/suggest?q=${encodeURIComponent(q)}`).then(r => r.json());
+      if (!list.length) { dropdown.style.display = "none"; return; }
+      dropdown.innerHTML = list.map(t => `<li class="suggest-item">${esc(t)}</li>`).join("");
+      dropdown.style.display = "block";
+    } catch { dropdown.style.display = "none"; }
+  }, 250);
+});
+dropdown.addEventListener("click", e => {
+  const li = e.target.closest(".suggest-item");
+  if (!li) return;
+  searchInput.value = li.textContent;
+  dropdown.style.display = "none";
+  document.getElementById("searchForm").submit();
+});
+document.addEventListener("click", e => {
+  if (!e.target.closest(".search-row")) dropdown.style.display = "none";
+});
+
+// ── star ratings ──────────────────────────────────────────────────────────────
+document.addEventListener("click", async e => {
+  const star = e.target.closest(".star-btn");
+  if (!star || star.closest(".modal-stars")) return;
+  const row    = star.closest(".star-row");
+  const card   = star.closest(".book-card");
+  const rating = parseInt(star.dataset.val);
+  await fetch("/api/rate", { method: "POST", headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ isbn: row.dataset.isbn, title: card.dataset.title, author: card.dataset.author, rating }) });
+  row.querySelectorAll(".star-btn").forEach((s, i) => s.classList.toggle("filled", i < rating));
+});
+
+// ── mark as read ──────────────────────────────────────────────────────────────
+document.addEventListener("click", async e => {
+  const btn = e.target.closest(".read-btn");
+  if (!btn || btn.closest(".modal")) return;
+  const { isbn, title, author } = btn.dataset;
+  const data = await fetch("/api/already_read", { method: "POST", headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ isbn, title, author }) }).then(r => r.json());
+  if (data.ok) {
+    btn.classList.toggle("active", data.marked);
+    btn.textContent = data.marked ? "✓ Read" : "Mark Read";
+    const card  = btn.closest(".book-card");
+    card.classList.toggle("already-read", data.marked);
+    let badge = card.querySelector(".read-badge");
+    if (data.marked && !badge) {
+      badge = Object.assign(document.createElement("div"), { className: "read-badge", textContent: "✓ Read" });
+      card.querySelector(".cover-wrap").appendChild(badge);
+    } else if (!data.marked && badge) badge.remove();
+  }
+});
+
+// ── book detail modal ─────────────────────────────────────────────────────────
+const overlay   = document.getElementById("modalOverlay");
+const modalBody = document.getElementById("modalBody");
+
+document.addEventListener("click", async e => {
+  const btn = e.target.closest(".detail-btn");
+  if (!btn) return;
+  const { title, author, isbn } = btn.dataset;
+  overlay.classList.add("open");
+  modalBody.innerHTML = `<div style="padding:40px;text-align:center;" class="muted">Loading details...</div>`;
+
+  try {
+    const data = await fetch(
+      `/api/book_detail?title=${encodeURIComponent(title)}&author=${encodeURIComponent(author)}&isbn=${encodeURIComponent(isbn)}`
+    ).then(r => r.json());
+    if (!data.ok) throw new Error(data.error);
+
+    const starsHtml = [1,2,3,4,5].map(i =>
+      `<button class="star-btn" data-val="${i}" type="button">★</button>`
+    ).join("");
+
+    modalBody.innerHTML = `
+      <div class="modal-inner">
+        <div class="modal-cover-col">
+          ${data.cover_url
+            ? `<img class="modal-cover" src="${esc(data.cover_url)}" alt="${esc(title)}"/>`
+            : `<div class="cover modal-cover-placeholder"><div class="cover-title">${esc(title)}</div></div>`}
+          <div class="modal-meta-pills">
+            ${data.year  ? `<span class="stat">📅 ${data.year}</span>`       : ""}
+            ${data.pages ? `<span class="stat">📖 ${data.pages} pages</span>` : ""}
+          </div>
+          <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
+            ${data.buy_link ? `<a class="btn btn-small" style="text-decoration:none;" href="${esc(data.buy_link)}" target="_blank" rel="noopener">🛒 Amazon</a>` : ""}
+            ${data.google_link ? `<a class="btn btn-small" style="text-decoration:none;background:var(--btn-dark);" href="${esc(data.google_link)}" target="_blank" rel="noopener">📖 Google Books</a>` : ""}
+          </div>
+        </div>
+        <div class="modal-info-col">
+          <h2 class="modal-title">${esc(title)}</h2>
+          <p class="modal-author">by ${esc(author)}</p>
+          ${data.description ? `<p class="modal-desc">${esc(data.description)}</p>` : ""}
+          ${data.subjects.length
+            ? `<div class="modal-tags">${data.subjects.map(s=>`<span class="pill">${esc(s)}</span>`).join("")}</div>`
+            : ""}
+
+          <div class="modal-section">
+            <div class="section-label">Your rating</div>
+            <div class="star-row modal-stars" data-isbn="${esc(isbn)}" data-title="${esc(title)}" data-author="${esc(author)}">${starsHtml}</div>
+          </div>
+
+          <div class="modal-section">
+            <div class="section-label">Your review</div>
+            <textarea class="review-input" id="reviewInput" placeholder="Write a short review..." maxlength="500">${esc(data.user_review)}</textarea>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;">
+              <span class="muted review-count" id="reviewCount">${data.user_review.length}/500</span>
+              <button class="btn btn-small" id="saveReviewBtn" data-isbn="${esc(isbn)}" data-title="${esc(title)}" data-author="${esc(author)}">Post</button>
+            </div>
+            <div class="review-msg" id="reviewMsg"></div>
+          </div>
+
+          ${data.all_reviews.length ? `
+          <div class="modal-section">
+            <div class="section-label">What readers think</div>
+            <div id="allReviews">
+              ${data.all_reviews.map(r => `
+              <div class="review-item">
+                <div class="review-item-header">
+                  <span class="review-name">${esc(r.name)}</span>
+                  <span class="review-date">${esc(r.date)}</span>
+                </div>
+                <p class="review-item-text">${esc(r.review)}</p>
+              </div>`).join("")}
+            </div>
+          </div>` : `<div id="allReviews"></div>`}
+
+          ${data.similar.length ? `
+          <div class="modal-section">
+            <div class="section-label">More by ${esc(author)}</div>
+            <div class="similar-row">
+              ${data.similar.map(b => `
+              <div class="similar-card">
+                ${b.cover_url
+                  ? `<img class="similar-cover" src="${esc(b.cover_url)}" alt="${esc(b.title)}"/>`
+                  : `<div class="similar-cover-placeholder"></div>`}
+                <div class="similar-title">${esc(b.title)}</div>
+              </div>`).join("")}
+            </div>
+          </div>` : ""}
+        </div>
+      </div>`;
+
+    // sync modal stars with card
+    const pageRow = document.querySelector(`.star-row[data-isbn="${isbn}"]`);
+    if (pageRow) {
+      const filled = pageRow.querySelectorAll(".star-btn.filled").length;
+      modalBody.querySelectorAll(".modal-stars .star-btn").forEach((s,i) => s.classList.toggle("filled", i < filled));
+    }
+
+    // modal star clicks
+    modalBody.querySelectorAll(".modal-stars .star-btn").forEach(s => {
+      s.addEventListener("click", async () => {
+        const row    = s.closest(".star-row");
+        const rating = parseInt(s.dataset.val);
+        await fetch("/api/rate", { method: "POST", headers: {"Content-Type":"application/json"},
+          body: JSON.stringify({ isbn: row.dataset.isbn, title: row.dataset.title, author: row.dataset.author, rating }) });
+        row.querySelectorAll(".star-btn").forEach((b,i) => b.classList.toggle("filled", i < rating));
+        const pr = document.querySelector(`.star-row[data-isbn="${row.dataset.isbn}"]`);
+        if (pr) pr.querySelectorAll(".star-btn").forEach((b,i) => b.classList.toggle("filled", i < rating));
+      });
+    });
+
+    // review char counter
+    const ri = document.getElementById("reviewInput");
+    ri.addEventListener("input", () => {
+      document.getElementById("reviewCount").textContent = ri.value.length + "/500";
+    });
+
+    // post review
+    document.getElementById("saveReviewBtn").addEventListener("click", async () => {
+      const btn    = document.getElementById("saveReviewBtn");
+      const review = ri.value.trim();
+      const msg    = document.getElementById("reviewMsg");
+      if (!review) { msg.textContent = "Write something first."; msg.style.color = "var(--error)"; return; }
+      const res = await fetch("/api/review", { method: "POST", headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ isbn: btn.dataset.isbn, title: btn.dataset.title, author: btn.dataset.author, review })
+      }).then(r => r.json());
+      if (res.ok) {
+        msg.textContent = "Posted!"; msg.style.color = "var(--accent)";
+        const allReviews = document.getElementById("allReviews");
+        const today      = new Date().toISOString().slice(0,10);
+        const newItem    = document.createElement("div");
+        newItem.className = "review-item";
+        newItem.innerHTML = `
+          <div class="review-item-header">
+            <span class="review-name">${esc("{{ user_name }}")}</span>
+            <span class="review-date">${today}</span>
+          </div>
+          <p class="review-item-text">${esc(review)}</p>`;
+        allReviews.prepend(newItem);
+      } else {
+        msg.textContent = res.error || "Error saving."; msg.style.color = "var(--error)";
+      }
+    });
+
+  } catch (err) {
+    modalBody.innerHTML = `<div class="inline-error">Could not load details: ${esc(err.message)}</div>`;
+  }
+});
+
+document.getElementById("modalClose").addEventListener("click", () => overlay.classList.remove("open"));
+overlay.addEventListener("click", e => { if (e.target === overlay) overlay.classList.remove("open"); });
+
+// ── mood picks ────────────────────────────────────────────────────────────────
+const bookGrid  = document.getElementById("bookGrid");
+const loadingRow = document.getElementById("loadingRow");
+const emptyState = document.getElementById("emptyState");
+const statusRow  = document.getElementById("statusRow");
+
+function buildCard(r) {
+  const title  = r["Book-Title"]  || "";
+  const author = r["Book-Author"] || "";
+  const isbn   = r["ISBN"] || r["isbn"] || "";
+  const cover  = r["cover_url"];
+  const buy    = r["buy_link"] || "";
+  const google  = r["google_link"] || "";
+  return `
+    <article class="book-card" data-isbn="${esc(isbn)}" data-title="${esc(title)}" data-author="${esc(author)}" data-buy="${esc(buy)}">
+      <div class="cover-wrap">
+        ${cover
+          ? `<img class="cover-img" src="${esc(cover)}" alt="${esc(title)}" loading="lazy"/>`
+          : `<div class="cover"><div class="cover-title">${esc(title)}</div><div class="cover-author">${esc(author)}</div></div>`}
+        <button class="heart-btn" type="button" aria-label="Save to favourites">
+          <svg class="heart" viewBox="0 0 24 24">
+            <path d="M12 21s-7.5-4.6-10-9C-0.6 7.2 2.4 3.5 6.5 4.1c1.7.2 3.1 1.3 3.9 2.6.8-1.3 2.2-2.4 3.9-2.6 4.1-.6 7.1 3.1 4.5 7.9-2.5 4.4-10 9-10 9z"/>
+          </svg>
+        </button>
+      </div>
+      <div class="book-meta">
+        <h3 class="book-title">${esc(title)}</h3>
+        <p class="book-author">${esc(author)}</p>
+        <div class="book-stats">
+          ${r.genre ? `<span class="stat">🏷 ${esc(r.genre)}</span>` : ""}
+        </div>
+        <div class="star-row" data-isbn="${esc(isbn)}">
+          ${[1,2,3,4,5].map(i=>`<button class="star-btn" data-val="${i}" type="button">★</button>`).join("")}
+        </div>
+        <div class="card-actions">
+          <button class="card-btn detail-btn" type="button" data-title="${esc(title)}" data-author="${esc(author)}" data-isbn="${esc(isbn)}">🔍 Details</button>
+          <button class="card-btn read-btn" type="button" data-isbn="${esc(isbn)}" data-title="${esc(title)}" data-author="${esc(author)}">Mark Read</button>
+          ${buy ? `<a class="card-btn buy-btn" href="${esc(buy)}" target="_blank" rel="noopener">🛒 Amazon</a>` : ""}
+          ${google ? `<a class="card-btn" href="${esc(google)}" target="_blank" rel="noopener">📖 Google Books</a>` : ""}
+        </div>
+      </div>
+    </article>`;
+}
+
+async function fetchMood(mood) {
+  loadingRow.style.display = "flex";
+  statusRow.innerHTML = "";
+  try {
+    const data = await fetch(`/api/mood/${encodeURIComponent(mood)}`).then(r => r.json());
+    if (!data.ok) throw new Error(data.error);
+    statusRow.innerHTML = `<div class="match-pill fade-in">Mood: <b>${esc(mood)}</b></div>`;
+    bookGrid.innerHTML  = data.recs.map(buildCard).join("");
+    emptyState.style.display = "none";
+    syncHearts();
+  } catch (err) {
+    statusRow.innerHTML = `<div class="inline-error">${esc(err.message)}</div>`;
+  } finally {
+    loadingRow.style.display = "none";
+  }
+}
+
+document.querySelectorAll(".mood-card").forEach(btn =>
+  btn.addEventListener("click", () => fetchMood(btn.dataset.mood))
+);
+</script>
+</body>
+</html>

@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en" data-theme="pink">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>ShelfWise — Favourites</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="app-page">
+
+<header class="topbar">
+  <div class="brand">
+    <div class="brand-mark">📚</div>
+    <div class="brand-text">
+      <div class="brand-title">ShelfWise</div>
+      <div class="brand-subtitle">Personalised Book Recommender</div>
+    </div>
+  </div>
+  <div class="topbar-actions">
+    <button class="icon-btn" id="themeToggle" aria-label="Toggle theme"><span class="icon">🌙</span></button>
+    <a class="btn btn-ghost btn-small" href="{{ url_for('dashboard') }}">← Back</a>
+    <a class="btn btn-small" href="{{ url_for('logout') }}">Logout</a>
+  </div>
+</header>
+
+<main class="container">
+  <section class="results">
+    <div class="results-head">
+      <h2 class="section-title">❤️ My Favourites</h2>
+      <button class="btn btn-ghost btn-small" id="clearBtn">Clear all</button>
+    </div>
+
+    <div class="book-grid" id="bookGrid"></div>
+
+    <div class="empty-state" id="emptyState" style="display:none;">
+      <div class="empty-ico">🌸</div>
+      <div class="empty-title">No favourites saved yet</div>
+      <div class="empty-sub">
+        Tap the ❤️ on any book card to save it here.<br><br>
+        <a class="auth-link" href="{{ url_for('dashboard') }}">Browse recommendations →</a>
+      </div>
+    </div>
+
+    {% if books %}
+    <div style="margin-top: 40px;">
+      <h2 class="section-title">⭐ My Ratings</h2>
+      <p class="muted" style="margin-bottom: 16px;">Books you've rated — saved to your account</p>
+      <div class="book-grid">
+        {% for b in books %}
+        <article class="book-card">
+          <div class="cover-wrap">
+            {% if b.cover_url %}
+              <img class="cover-img" src="{{ b.cover_url }}" alt="{{ b.title }}" loading="lazy"/>
+            {% else %}
+              <div class="cover">
+                <div class="cover-title">{{ b.title }}</div>
+                <div class="cover-author">{{ b.author }}</div>
+              </div>
+            {% endif %}
+          </div>
+          <div class="book-meta">
+            <h3 class="book-title">{{ b.title }}</h3>
+            <p class="book-author">{{ b.author }}</p>
+            <div class="star-row static">
+              {% for i in range(1,6) %}
+                <span class="star-btn {% if i <= b.rating %}filled{% endif %}">★</span>
+              {% endfor %}
+            </div>
+            {% if b.review %}<p class="review-text">"{{ b.review }}"</p>{% endif %}
+            <div class="book-stats"><span class="stat muted">🕐 {{ b.rated_at }}</span></div>
+            <div class="card-actions">
+              {% if b.buy_link %}
+                <a class="card-btn buy-btn" href="{{ b.buy_link }}" target="_blank" rel="noopener">🛒 Amazon</a>
+              {% endif %}
+            </div>
+          </div>
+        </article>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+  </section>
+</main>
+
+<footer class="footer">
+  <div class="footer-inner">
+<div class="footer-left"><b>ShelfWise</b> · Built with Flask · Powered by Google Books API</div>  </div>
+</footer>
+
+<script>
+const favKey   = "faves::{{ user_email }}";
+const themeKey = "theme::{{ user_email }}";
+const root     = document.documentElement;
+const toggle   = document.getElementById("themeToggle");
+
+function applyTheme(t) {
+  root.setAttribute("data-theme", t);
+  toggle.querySelector(".icon").textContent = t === "night" ? "☀️" : "🌙";
+}
+applyTheme(localStorage.getItem(themeKey) || "pink");
+toggle.addEventListener("click", () => {
+  const next = root.getAttribute("data-theme") === "pink" ? "night" : "pink";
+  localStorage.setItem(themeKey, next);
+  applyTheme(next);
+});
+
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, m =>
+    ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
+}
+
+function getFaves() { try { return JSON.parse(localStorage.getItem(favKey) || "[]"); } catch { return []; } }
+function setFaves(list) { localStorage.setItem(favKey, JSON.stringify(list)); }
+
+function removeFave(isbn) {
+  setFaves(getFaves().filter(b => b.isbn !== isbn));
+  render();
+}
+
+function render() {
+  const faves = getFaves();
+  const grid  = document.getElementById("bookGrid");
+  const empty = document.getElementById("emptyState");
+  if (!faves.length) { grid.innerHTML = ""; empty.style.display = "block"; return; }
+  empty.style.display = "none";
+  grid.innerHTML = faves.map(b => `
+    <article class="book-card" data-isbn="${esc(b.isbn)}">
+      <div class="cover-wrap">
+        <div class="cover">
+          <div class="cover-title">${esc(b.title)}</div>
+          <div class="cover-author">${esc(b.author)}</div>
+        </div>
+        <button class="heart-btn faved" type="button" onclick="removeFave('${esc(b.isbn)}')" aria-label="Remove">
+          <svg class="heart" viewBox="0 0 24 24">
+            <path d="M12 21s-7.5-4.6-10-9C-0.6 7.2 2.4 3.5 6.5 4.1c1.7.2 3.1 1.3 3.9 2.6.8-1.3 2.2-2.4 3.9-2.6 4.1-.6 7.1 3.1 4.5 7.9-2.5 4.4-10 9-10 9z"/>
+          </svg>
+        </button>
+      </div>
+      <div class="book-meta">
+        <h3 class="book-title">${esc(b.title)}</h3>
+        <p class="book-author">${esc(b.author)}</p>
+        <div class="book-stats"><span class="stat muted">🕐 ${new Date(b.savedAt).toLocaleDateString()}</span></div>
+      </div>
+    </article>`).join("");
+}
+
+document.getElementById("clearBtn").addEventListener("click", () => {
+  if (!getFaves().length) return;
+  if (confirm("Remove all saved favourites?")) { setFaves([]); render(); }
+});
+
+render();
+</script>
+</body>
+</html>
