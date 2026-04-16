@@ -151,10 +151,11 @@ def get_recommendations(query, user_id=None):
     matched_title = seed_info.get("title", query)
     matched_author = ", ".join(seed_info.get("authors", []))
 
-    # basic validation — if user typed random text, first result title won't share any words
+    # basic validation — only check short queries (1-2 words) like random names/gibberish
+    # longer queries are almost always real book titles coming from the suggestion dropdown
     first_title = matched_title.lower()
     query_words = [w for w in query.lower().split() if len(w) > 2]
-    if query_words and not any(w in first_title for w in query_words):
+    if len(query.split()) <= 2 and query_words and not any(w in first_title for w in query_words):
         raise ValueError(f"Couldn't find a book called '{query}'. Please enter a real book title.")
 
     if not matched_author:
