@@ -105,13 +105,11 @@ def parse_book(item):
     author = ", ".join(info.get("authors", ["Unknown"]))
     genre = (info.get("categories") or [""])[0]
 
-    # ISBN search is much more accurate than title search on Amazon
     if isbn:
         buy_link = f"https://www.amazon.co.uk/s?k={isbn}"
     else:
         buy_link = "https://www.amazon.co.uk/s?k=" + requests.utils.quote(f"{title} {author}")
 
-    # google books page as fallback - always works since data came from there
     google_link = info.get("infoLink", "")
 
     return {
@@ -129,63 +127,76 @@ def parse_book(item):
 
 
 def get_recommendations(query, user_id=None):
-    try:
-        res = requests.get(BOOKS_URL, params={"q": f"intitle:{query}", "maxResults": 1, "key": API_KEY}, timeout=6)
-        items = res.json().get("items", [])
-
-        if not items:
-            res = requests.get(BOOKS_URL, params={"q": query, "maxResults": 1, "key": API_KEY}, timeout=6)
-            items = res.json().get("items", [])
-            if items:
-                result_title = items[0].get("volumeInfo", {}).get("title", "").lower()
-                if not any(word in result_title for word in query.lower().split() if len(word) > 2):
-                    raise ValueError(f"Couldn't find a book called '{query}'. Please enter a real book title.")
-    except Exception as e:
-        raise ValueError(f"Couldn't reach Google Books: {e}")
-
-    if not items:
-        raise ValueError(f"Couldn't find '{query}'. Try a different title.")
-
-    seed = items[0].get("volumeInfo", {})
-    matched_title = seed.get("title", query)
-    matched_author = ", ".join(seed.get("authors", []))
-    categories = seed.get("categories", [])
-
-    if not matched_author:
-        raise ValueError(f"Couldn't find a book called '{query}'. Please enter a real book title.")
-
-    search_q = f"subject:{categories[0].split('/')[0]}" if categories else " ".join(query.split()[:3])
-
-    pool = [items[0]]
+    # step 1 — build a pool of books by searching the query directly
+    # this is more reliable than finding one seed book and using its category
+    pool = []
     for start in [0, 40]:
         try:
-            r = requests.get(BOOKS_URL, params={"q": search_q, "maxResults": 40, "startIndex": start, "key": API_KEY}, timeout=8)
+            r = requests.get(BOOKS_URL, params={
+                "q": query, "maxResults": 40,
+                "startIndex": start, "key": API_KEY
+            }, timeout=8)
             batch = r.json().get("items", [])
             pool += batch
             if len(batch) < 40:
                 break
+        except Exception as e:
+            raise ValueError(f"Couldn't reach Google Books: {e}")
+
+    if not pool:
+        raise ValueError(f"Couldn't find anything for '{query}'. Try a different title.")
+
+    # grab title/author from first result for display purposes
+    seed_info = pool[0].get("volumeInfo", {})
+    matched_title = seed_info.get("title", query)
+    matched_author = ", ".join(seed_info.get("authors", []))
+
+    # basic validation — if user typed random text, first result title won't share any words
+    first_title = matched_title.lower()
+    query_words = [w for w in query.lower().split() if len(w) > 2]
+    if query_words and not any(w in first_title for w in query_words):
+        raise ValueError(f"Couldn't find a book called '{query}'. Please enter a real book title.")
+
+    if not matched_author:
+        raise ValueError(f"Couldn't find a book called '{query}'. Please enter a real book title.")
+
+    # step 2 — also add category-based results to widen the pool
+    categories = seed_info.get("categories", [])
+    if categories:
+        try:
+            cat = categories[0].split("/")[0].strip()
+            r = requests.get(BOOKS_URL, params={
+                "q": f"subject:{cat}", "maxResults": 40, "key": API_KEY
+            }, timeout=8)
+            pool += r.json().get("items", [])
         except Exception:
-            break
+            pass
 
-    if len(pool) < 2:
-        raise ValueError(f"Not enough books found for '{query}'.")
-
+    # step 3 — build dataframe and run tfidf
     df = pd.DataFrame([parse_book(i) for i in pool])
     df = df[df["Book-Title"].str.strip() != ""].drop_duplicates(subset=["Book-Title"]).reset_index(drop=True)
 
-    df["search_text"] = (df["Book-Title"].fillna("") + " " + df["Book-Author"].fillna("") + " " + df["description"].fillna("")).str.lower()
+    if len(df) < 2:
+        raise ValueError(f"Not enough books found for '{query}'.")
+
+    df["search_text"] = (
+        df["Book-Title"].fillna("") + " " +
+        df["Book-Author"].fillna("") + " " +
+        df["description"].fillna("")
+    ).str.lower()
+
+    # use the user's query as the tfidf seed — much more accurate than using
+    # one specific book, because the pool was built from the query itself
+    all_texts = [query.lower()] + df["search_text"].tolist()
     vectorizer = TfidfVectorizer(stop_words="english", ngram_range=(1, 2), min_df=1)
-    matrix = vectorizer.fit_transform(df["search_text"])
+    matrix = vectorizer.fit_transform(all_texts)
 
-    matches = df["Book-Title"].str.lower().str.strip()
-    seed_matches = matches[matches == matched_title.lower().strip()].index
-    seed_idx = seed_matches[0] if len(seed_matches) > 0 else 0
-
-    scores = cosine_similarity(matrix[seed_idx], matrix).ravel()
-    scores[seed_idx] = -1
+    # index 0 is the query seed, books start at index 1
+    scores = cosine_similarity(matrix[0], matrix[1:]).ravel()
     top = np.argsort(-scores)[:20]
     results = df.iloc[top].copy().reset_index(drop=True)
 
+    # filter out books user already marked as read
     if user_id:
         conn = get_db()
         read = {r["isbn"] for r in conn.execute("SELECT isbn FROM user_already_read WHERE user_id=?", (user_id,)).fetchall()}
@@ -334,6 +345,35 @@ def favourites():
         books=books)
 
 
+# new page showing all books marked as already read
+@app.route("/already_read")
+@login_required
+def already_read():
+    user_id = session["user_id"]
+    conn = get_db()
+    books = conn.execute(
+        "SELECT isbn, book_title, book_author, marked_at FROM user_already_read WHERE user_id=? ORDER BY marked_at DESC",
+        (user_id,)
+    ).fetchall()
+    conn.close()
+
+    book_list = []
+    for row in books:
+        buy_link = "https://www.amazon.co.uk/s?k=" + requests.utils.quote(f"{row['book_title']} {row['book_author']}")
+        book_list.append({
+            "isbn": row["isbn"],
+            "title": row["book_title"],
+            "author": row["book_author"],
+            "marked_at": row["marked_at"][:10],
+            "buy_link": buy_link,
+        })
+
+    return render_template("already_read.html",
+        user_name=session.get("user_name", "there"),
+        user_email=session.get("user_email", ""),
+        books=book_list)
+
+
 @app.route("/api/suggest")
 @login_required
 def api_suggest():
@@ -381,6 +421,21 @@ def api_review():
     conn = get_db()
     conn.execute("INSERT INTO user_reviews (user_id,isbn,book_title,book_author,review,created_at) VALUES (?,?,?,?,?,?) ON CONFLICT(user_id,isbn) DO UPDATE SET review=excluded.review, created_at=excluded.created_at",
                  (session["user_id"], isbn, title, author, review, datetime.utcnow().isoformat()))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
+# delete a user's own review
+@app.route("/api/review/delete", methods=["POST"])
+@login_required
+def api_review_delete():
+    d = request.get_json() or {}
+    isbn = d.get("isbn", "").strip()
+    if not isbn:
+        return jsonify({"ok": False}), 400
+    conn = get_db()
+    conn.execute("DELETE FROM user_reviews WHERE user_id=? AND isbn=?", (session["user_id"], isbn))
     conn.commit()
     conn.close()
     return jsonify({"ok": True})
@@ -509,7 +564,7 @@ def api_mood(mood):
     if not query:
         return jsonify({"ok": False, "error": "Unknown mood."}), 400
     try:
-        res = requests.get(BOOKS_URL, params={"q": query, "maxResults": 12, "orderBy": "relevance", "key": API_KEY}, timeout=5)
+        res = requests.get(BOOKS_URL, params={"q": query, "maxResults": 12, "orderBy": "relevance", "key": API_KEY}, timeout=8)
         recs = [parse_book(item) for item in res.json().get("items", []) if item.get("volumeInfo", {}).get("title")]
         return jsonify({"ok": True, "recs": recs})
     except Exception as e:

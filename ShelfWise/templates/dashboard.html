@@ -22,6 +22,7 @@
   <div class="topbar-actions">
     <button class="icon-btn" id="themeToggle" aria-label="Toggle theme"><span class="icon">🌙</span></button>
     <a class="btn btn-ghost btn-small" href="{{ url_for('favourites') }}">❤️ Favourites</a>
+    <a class="btn btn-ghost btn-small" href="{{ url_for('already_read') }}">✅ Read</a>
     <div class="user-chip">
       <span class="user-dot"></span>
       <span class="user-text">{{ user_email }}</span>
@@ -32,7 +33,6 @@
 
 <main class="container">
 
-  <!-- search -->
   <section class="hero">
     <h1 class="hero-title"><span id="welcomeText">Welcome back, {{ user_name }}!</span></h1>
     <p class="hero-subtitle">Enter any book title — fiction, tech, history, anything — to find similar reads.</p>
@@ -55,7 +55,6 @@
     </form>
   </section>
 
-  <!-- mood picks -->
   <section class="mood">
     <div class="mood-head">
       <h2 class="section-title">Mood picks</h2>
@@ -109,7 +108,6 @@
     </div>
   </section>
 
-  <!-- results -->
   <section class="results">
     <div class="results-head">
       <h2 class="section-title">Recommended for you</h2>
@@ -193,10 +191,10 @@
 
 <footer class="footer">
   <div class="footer-inner">
-<div class="footer-left"><b>ShelfWise</b> · Built with Flask · Powered by Google Books API</div>  </div>
+    <div class="footer-left"><b>ShelfWise</b> · Built with Flask · Powered by Google Books API</div>
+  </div>
 </footer>
 
-<!-- book detail modal -->
 <div class="modal-overlay" id="modalOverlay">
   <div class="modal">
     <button class="modal-close" id="modalClose">✕</button>
@@ -205,7 +203,6 @@
 </div>
 
 <script>
-// ── theme toggle ──────────────────────────────────────────────────────────────
 const themeKey = "theme::{{ user_email }}";
 const favKey   = "faves::{{ user_email }}";
 const root     = document.documentElement;
@@ -222,7 +219,6 @@ toggle.addEventListener("click", () => {
   applyTheme(next);
 });
 
-// welcome pop animation
 const wt = document.getElementById("welcomeText");
 if (wt) { wt.classList.add("type-pop"); setTimeout(() => wt.classList.remove("type-pop"), 1200); }
 
@@ -231,7 +227,6 @@ function esc(s) {
     ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
 }
 
-// ── favourites (localStorage) ─────────────────────────────────────────────────
 function getFaves() { try { return JSON.parse(localStorage.getItem(favKey) || "[]"); } catch { return []; } }
 function setFaves(list) { localStorage.setItem(favKey, JSON.stringify(list)); }
 function isFaved(isbn, title) {
@@ -260,7 +255,6 @@ document.addEventListener("click", e => {
 });
 syncHearts();
 
-// ── search suggestions ────────────────────────────────────────────────────────
 const searchInput = document.getElementById("searchInput");
 const dropdown    = document.getElementById("suggestionsDropdown");
 let timer = null;
@@ -288,7 +282,6 @@ document.addEventListener("click", e => {
   if (!e.target.closest(".search-row")) dropdown.style.display = "none";
 });
 
-// ── star ratings ──────────────────────────────────────────────────────────────
 document.addEventListener("click", async e => {
   const star = e.target.closest(".star-btn");
   if (!star || star.closest(".modal-stars")) return;
@@ -300,7 +293,6 @@ document.addEventListener("click", async e => {
   row.querySelectorAll(".star-btn").forEach((s, i) => s.classList.toggle("filled", i < rating));
 });
 
-// ── mark as read ──────────────────────────────────────────────────────────────
 document.addEventListener("click", async e => {
   const btn = e.target.closest(".read-btn");
   if (!btn || btn.closest(".modal")) return;
@@ -320,7 +312,6 @@ document.addEventListener("click", async e => {
   }
 });
 
-// ── book detail modal ─────────────────────────────────────────────────────────
 const overlay   = document.getElementById("modalOverlay");
 const modalBody = document.getElementById("modalBody");
 
@@ -352,7 +343,7 @@ document.addEventListener("click", async e => {
             ${data.pages ? `<span class="stat">📖 ${data.pages} pages</span>` : ""}
           </div>
           <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
-            ${data.buy_link ? `<a class="btn btn-small" style="text-decoration:none;" href="${esc(data.buy_link)}" target="_blank" rel="noopener">🛒 Amazon</a>` : ""}
+            ${data.buy_link    ? `<a class="btn btn-small" style="text-decoration:none;" href="${esc(data.buy_link)}" target="_blank" rel="noopener">🛒 Amazon</a>` : ""}
             ${data.google_link ? `<a class="btn btn-small" style="text-decoration:none;background:var(--btn-dark);" href="${esc(data.google_link)}" target="_blank" rel="noopener">📖 Google Books</a>` : ""}
           </div>
         </div>
@@ -363,12 +354,10 @@ document.addEventListener("click", async e => {
           ${data.subjects.length
             ? `<div class="modal-tags">${data.subjects.map(s=>`<span class="pill">${esc(s)}</span>`).join("")}</div>`
             : ""}
-
           <div class="modal-section">
             <div class="section-label">Your rating</div>
             <div class="star-row modal-stars" data-isbn="${esc(isbn)}" data-title="${esc(title)}" data-author="${esc(author)}">${starsHtml}</div>
           </div>
-
           <div class="modal-section">
             <div class="section-label">Your review</div>
             <textarea class="review-input" id="reviewInput" placeholder="Write a short review..." maxlength="500">${esc(data.user_review)}</textarea>
@@ -378,7 +367,6 @@ document.addEventListener("click", async e => {
             </div>
             <div class="review-msg" id="reviewMsg"></div>
           </div>
-
           ${data.all_reviews.length ? `
           <div class="modal-section">
             <div class="section-label">What readers think</div>
@@ -393,7 +381,6 @@ document.addEventListener("click", async e => {
               </div>`).join("")}
             </div>
           </div>` : `<div id="allReviews"></div>`}
-
           ${data.similar.length ? `
           <div class="modal-section">
             <div class="section-label">More by ${esc(author)}</div>
@@ -410,14 +397,12 @@ document.addEventListener("click", async e => {
         </div>
       </div>`;
 
-    // sync modal stars with card
     const pageRow = document.querySelector(`.star-row[data-isbn="${isbn}"]`);
     if (pageRow) {
       const filled = pageRow.querySelectorAll(".star-btn.filled").length;
       modalBody.querySelectorAll(".modal-stars .star-btn").forEach((s,i) => s.classList.toggle("filled", i < filled));
     }
 
-    // modal star clicks
     modalBody.querySelectorAll(".modal-stars .star-btn").forEach(s => {
       s.addEventListener("click", async () => {
         const row    = s.closest(".star-row");
@@ -430,13 +415,11 @@ document.addEventListener("click", async e => {
       });
     });
 
-    // review char counter
     const ri = document.getElementById("reviewInput");
     ri.addEventListener("input", () => {
       document.getElementById("reviewCount").textContent = ri.value.length + "/500";
     });
 
-    // post review
     document.getElementById("saveReviewBtn").addEventListener("click", async () => {
       const btn    = document.getElementById("saveReviewBtn");
       const review = ri.value.trim();
@@ -453,7 +436,7 @@ document.addEventListener("click", async e => {
         newItem.className = "review-item";
         newItem.innerHTML = `
           <div class="review-item-header">
-            <span class="review-name">${esc("{{ user_name }}")}</span>
+            <span class="review-name">{{ user_name }}</span>
             <span class="review-date">${today}</span>
           </div>
           <p class="review-item-text">${esc(review)}</p>`;
@@ -471,8 +454,7 @@ document.addEventListener("click", async e => {
 document.getElementById("modalClose").addEventListener("click", () => overlay.classList.remove("open"));
 overlay.addEventListener("click", e => { if (e.target === overlay) overlay.classList.remove("open"); });
 
-// ── mood picks ────────────────────────────────────────────────────────────────
-const bookGrid  = document.getElementById("bookGrid");
+const bookGrid   = document.getElementById("bookGrid");
 const loadingRow = document.getElementById("loadingRow");
 const emptyState = document.getElementById("emptyState");
 const statusRow  = document.getElementById("statusRow");
@@ -483,7 +465,7 @@ function buildCard(r) {
   const isbn   = r["ISBN"] || r["isbn"] || "";
   const cover  = r["cover_url"];
   const buy    = r["buy_link"] || "";
-  const google  = r["google_link"] || "";
+  const google = r["google_link"] || "";
   return `
     <article class="book-card" data-isbn="${esc(isbn)}" data-title="${esc(title)}" data-author="${esc(author)}" data-buy="${esc(buy)}">
       <div class="cover-wrap">
@@ -508,7 +490,7 @@ function buildCard(r) {
         <div class="card-actions">
           <button class="card-btn detail-btn" type="button" data-title="${esc(title)}" data-author="${esc(author)}" data-isbn="${esc(isbn)}">🔍 Details</button>
           <button class="card-btn read-btn" type="button" data-isbn="${esc(isbn)}" data-title="${esc(title)}" data-author="${esc(author)}">Mark Read</button>
-          ${buy ? `<a class="card-btn buy-btn" href="${esc(buy)}" target="_blank" rel="noopener">🛒 Amazon</a>` : ""}
+          ${buy    ? `<a class="card-btn buy-btn" href="${esc(buy)}" target="_blank" rel="noopener">🛒 Amazon</a>` : ""}
           ${google ? `<a class="card-btn" href="${esc(google)}" target="_blank" rel="noopener">📖 Google Books</a>` : ""}
         </div>
       </div>

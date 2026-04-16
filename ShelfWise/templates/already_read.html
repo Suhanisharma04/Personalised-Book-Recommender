@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en" data-theme="pink">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>ShelfWise — Already Read</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="app-page">
+
+<header class="topbar">
+  <div class="brand">
+    <div class="brand-mark">📚</div>
+    <div class="brand-text">
+      <div class="brand-title">ShelfWise</div>
+      <div class="brand-subtitle">Personalised Book Recommender</div>
+    </div>
+  </div>
+  <div class="topbar-actions">
+    <button class="icon-btn" id="themeToggle" aria-label="Toggle theme"><span class="icon">🌙</span></button>
+    <a class="btn btn-ghost btn-small" href="{{ url_for('dashboard') }}">← Back</a>
+    <a class="btn btn-small" href="{{ url_for('logout') }}">Logout</a>
+  </div>
+</header>
+
+<main class="container">
+  <section class="results">
+    <div class="results-head">
+      <h2 class="section-title">✅ Already Read</h2>
+      <span class="muted">{{ books|length }} book{% if books|length != 1 %}s{% endif %} marked as read</span>
+    </div>
+
+    {% if books %}
+    <div class="book-grid">
+      {% for b in books %}
+      <article class="book-card already-read">
+        <div class="cover-wrap">
+          <div class="cover">
+            <div class="cover-title">{{ b.title }}</div>
+            <div class="cover-author">{{ b.author }}</div>
+          </div>
+          <div class="read-badge">✓ Read</div>
+        </div>
+        <div class="book-meta">
+          <h3 class="book-title">{{ b.title }}</h3>
+          <p class="book-author">{{ b.author }}</p>
+          <div class="book-stats">
+            <span class="stat muted">🕐 {{ b.marked_at }}</span>
+          </div>
+          <div class="card-actions">
+            <a class="card-btn buy-btn" href="{{ b.buy_link }}" target="_blank" rel="noopener">🛒 Amazon</a>
+            <button class="card-btn remove-read-btn" type="button"
+                    data-isbn="{{ b.isbn }}"
+                    data-title="{{ b.title }}"
+                    data-author="{{ b.author }}">✕ Remove</button>
+          </div>
+        </div>
+      </article>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <div class="empty-ico">📖</div>
+      <div class="empty-title">No books marked as read yet</div>
+      <div class="empty-sub">
+        Click "Mark Read" on any book card to track what you've read.<br><br>
+        <a class="auth-link" href="{{ url_for('dashboard') }}">Browse recommendations →</a>
+      </div>
+    </div>
+    {% endif %}
+  </section>
+</main>
+
+<footer class="footer">
+  <div class="footer-inner">
+    <div class="footer-left"><b>ShelfWise</b> · Built with Flask · Powered by Google Books API</div>
+  </div>
+</footer>
+
+<script>
+const themeKey = "theme::{{ user_email }}";
+const root = document.documentElement;
+const toggle = document.getElementById("themeToggle");
+
+function applyTheme(t) {
+  root.setAttribute("data-theme", t);
+  toggle.querySelector(".icon").textContent = t === "night" ? "☀️" : "🌙";
+}
+applyTheme(localStorage.getItem(themeKey) || "pink");
+toggle.addEventListener("click", () => {
+  const next = root.getAttribute("data-theme") === "pink" ? "night" : "pink";
+  localStorage.setItem(themeKey, next);
+  applyTheme(next);
+});
+
+// remove a book from already read list
+document.addEventListener("click", async e => {
+  const btn = e.target.closest(".remove-read-btn");
+  if (!btn) return;
+  const { isbn, title, author } = btn.dataset;
+  const data = await fetch("/api/already_read", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({ isbn, title, author })
+  }).then(r => r.json());
+
+  if (data.ok && !data.marked) {
+    // remove the card from the page
+    btn.closest(".book-card").remove();
+    // update the count text
+    const remaining = document.querySelectorAll(".book-card").length;
+    document.querySelector(".muted").textContent = `${remaining} book${remaining !== 1 ? "s" : ""} marked as read`;
+    if (remaining === 0) {
+      document.querySelector(".book-grid").remove();
+      document.querySelector(".results").insertAdjacentHTML("beforeend", `
+        <div class="empty-state">
+          <div class="empty-ico">📖</div>
+          <div class="empty-title">No books marked as read yet</div>
+          <div class="empty-sub">Click "Mark Read" on any book card to track what you've read.</div>
+        </div>`);
+    }
+  }
+});
+</script>
+</body>
+</html>
