@@ -1,4 +1,5 @@
 import os
+import json
 import sqlite3
 import requests
 import pandas as pd
@@ -66,6 +67,18 @@ def init_db():
             marked_at TEXT NOT NULL,
             UNIQUE(user_id, isbn)
         );
+        CREATE TABLE IF NOT EXISTS search_cache (
+            query TEXT PRIMARY KEY,
+            results_json TEXT NOT NULL,
+            matched_title TEXT,
+            matched_author TEXT,
+            cached_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS mood_cache (
+            mood TEXT PRIMARY KEY,
+            results_json TEXT NOT NULL,
+            cached_at TEXT NOT NULL
+        );
     """)
     conn.commit()
     conn.close()
@@ -129,71 +142,98 @@ def parse_book(item):
     }
 
 
-def get_recommendations(query, user_id=None):
-    # single call — one reliable request instead of multiple sequential ones
-    # this avoids the situation where a slow google response causes everything to fail
-    pool = []
-    try:
-        r = gb_session.get(BOOKS_URL, params={
-            "q": query, "maxResults": 40, "key": API_KEY
-        }, timeout=12)
-        pool = r.json().get("items", [])
-    except Exception:
-        pass
-
-    if not pool:
-        raise ValueError(f"Couldn't find anything for '{query}'. Try a different title.")
-
-    # grab title/author from first result for display purposes
-    seed_info = pool[0].get("volumeInfo", {})
-    matched_title = seed_info.get("title", query)
-    matched_author = ", ".join(seed_info.get("authors", []))
-
-    # basic validation — only check short queries (1-2 words) like random names/gibberish
-    first_title = matched_title.lower()
-    query_words = [w for w in query.lower().split() if len(w) > 2]
-    if len(query.split()) <= 2 and query_words and not any(w in first_title for w in query_words):
-        raise ValueError(f"Couldn't find '{query}'. Please enter a book title or keyword.")
-
-    # add category-based results to widen the pool — short timeout, truly optional
-    categories = seed_info.get("categories", [])
-    if categories:
+def fetch_pool_from_google(query):
+    # try up to 3 times with 30 second timeout each — guarantees a result on first click
+    for attempt in range(3):
         try:
-            cat = categories[0].split("/")[0].strip()
             r = gb_session.get(BOOKS_URL, params={
-                "q": f"subject:{cat}", "maxResults": 20, "key": API_KEY
-            }, timeout=4)
-            pool += r.json().get("items", [])
+                "q": query, "maxResults": 40, "key": API_KEY
+            }, timeout=30)
+            items = r.json().get("items", [])
+            if items:
+                return items
         except Exception:
-            pass  # fine if this fails, we already have 40 books
+            pass
+    return []
 
-    # step 3 — build dataframe and run tfidf
+
+def run_tfidf(query, pool):
     df = pd.DataFrame([parse_book(i) for i in pool])
     df = df[df["Book-Title"].str.strip() != ""].drop_duplicates(subset=["Book-Title"]).reset_index(drop=True)
 
     if len(df) < 2:
-        raise ValueError(f"Not enough books found for '{query}'.")
+        return None
 
-    # repeat title 3x and author 2x so tfidf treats them as more important than description
     df["search_text"] = (
         (df["Book-Title"].fillna("") + " ") * 3 +
         (df["Book-Author"].fillna("") + " ") * 2 +
         df["description"].fillna("")
     ).str.lower()
 
-    # use the user's query as the tfidf seed — much more accurate than using
-    # one specific book, because the pool was built from the query itself
     all_texts = [query.lower()] + df["search_text"].tolist()
     vectorizer = TfidfVectorizer(stop_words="english", ngram_range=(1, 2), min_df=1)
     matrix = vectorizer.fit_transform(all_texts)
-
-    # index 0 is the query seed, books start at index 1
     scores = cosine_similarity(matrix[0], matrix[1:]).ravel()
     top = np.argsort(-scores)[:20]
-    results = df.iloc[top].copy().reset_index(drop=True)
+    return df.iloc[top].copy().reset_index(drop=True)
 
-    # filter out books user already marked as read
-    # match by both isbn and title — isbn can differ between api calls for the same book
+
+def get_recommendations(query, user_id=None):
+    cache_key = query.strip().lower()
+
+    # check cache first — return instantly if already searched before
+    conn = get_db()
+    cached = conn.execute("SELECT results_json, matched_title, matched_author FROM search_cache WHERE query=?", (cache_key,)).fetchone()
+    conn.close()
+
+    if cached:
+        results = pd.DataFrame(json.loads(cached["results_json"]))
+        matched_title = cached["matched_title"]
+        matched_author = cached["matched_author"]
+    else:
+        # not cached — fetch from google with retry
+        pool = fetch_pool_from_google(query)
+
+        if not pool:
+            raise ValueError(f"Couldn't find anything for '{query}'. Please try again.")
+
+        seed_info = pool[0].get("volumeInfo", {})
+        matched_title = seed_info.get("title", query)
+        matched_author = ", ".join(seed_info.get("authors", []))
+
+        # basic validation for short queries only
+        first_title = matched_title.lower()
+        query_words = [w for w in query.lower().split() if len(w) > 2]
+        if len(query.split()) <= 2 and query_words and not any(w in first_title for w in query_words):
+            raise ValueError(f"Couldn't find '{query}'. Please enter a book title or keyword.")
+
+        # supplement with category books — optional, short timeout
+        categories = seed_info.get("categories", [])
+        if categories:
+            try:
+                cat = categories[0].split("/")[0].strip()
+                r = gb_session.get(BOOKS_URL, params={
+                    "q": f"subject:{cat}", "maxResults": 20, "key": API_KEY
+                }, timeout=6)
+                pool += r.json().get("items", [])
+            except Exception:
+                pass
+
+        results = run_tfidf(query, pool)
+
+        if results is None:
+            raise ValueError(f"Not enough books found for '{query}'.")
+
+        # save to cache so next search is instant
+        conn = get_db()
+        conn.execute(
+            "INSERT OR REPLACE INTO search_cache (query, results_json, matched_title, matched_author, cached_at) VALUES (?,?,?,?,?)",
+            (cache_key, json.dumps(results.to_dict("records")), matched_title, matched_author, datetime.utcnow().isoformat())
+        )
+        conn.commit()
+        conn.close()
+
+    # filter already-read books — done after cache so filter stays personal per user
     if user_id:
         conn = get_db()
         rows = conn.execute("SELECT isbn, book_title FROM user_already_read WHERE user_id=?", (user_id,)).fetchall()
@@ -566,25 +606,54 @@ def api_mood(mood):
     query = MOODS.get(mood.lower())
     if not query:
         return jsonify({"ok": False, "error": "Unknown mood."}), 400
-    try:
-        res = gb_session.get(BOOKS_URL, params={"q": query, "maxResults": 12, "orderBy": "relevance", "key": API_KEY}, timeout=12)
-        recs = [parse_book(item) for item in res.json().get("items", []) if item.get("volumeInfo", {}).get("title")]
 
-        # filter out books user already marked as read
-        user_id = session["user_id"]
+    # check mood cache first — return instantly if already loaded before
+    conn = get_db()
+    cached = conn.execute("SELECT results_json FROM mood_cache WHERE mood=?", (mood.lower(),)).fetchone()
+    conn.close()
+
+    if cached:
+        recs = json.loads(cached["results_json"])
+    else:
+        # not cached — try up to 3 times with 30 second timeout each
+        recs = []
+        for attempt in range(3):
+            try:
+                res = gb_session.get(BOOKS_URL, params={
+                    "q": query, "maxResults": 12, "orderBy": "relevance", "key": API_KEY
+                }, timeout=30)
+                items = res.json().get("items", [])
+                if items:
+                    recs = [parse_book(item) for item in items if item.get("volumeInfo", {}).get("title")]
+                    break
+            except Exception:
+                pass
+
+        if not recs:
+            return jsonify({"ok": False, "error": "Couldn't load mood picks. Please try again."}), 502
+
+        # save to cache so next click is instant
         conn = get_db()
-        rows = conn.execute("SELECT isbn, book_title FROM user_already_read WHERE user_id=?", (user_id,)).fetchall()
+        conn.execute(
+            "INSERT OR REPLACE INTO mood_cache (mood, results_json, cached_at) VALUES (?,?,?)",
+            (mood.lower(), json.dumps(recs), datetime.utcnow().isoformat())
+        )
+        conn.commit()
         conn.close()
-        if rows:
-            read_isbns = {r["isbn"].lower() for r in rows if r["isbn"]}
-            read_titles = {r["book_title"].lower().strip() for r in rows if r["book_title"]}
-            recs = [r for r in recs if
-                    r["ISBN"].lower() not in read_isbns and
-                    r["Book-Title"].lower().strip() not in read_titles]
 
-        return jsonify({"ok": True, "recs": recs[:12]})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 502
+    # filter already-read books
+    user_id = session["user_id"]
+    conn = get_db()
+    rows = conn.execute("SELECT isbn, book_title FROM user_already_read WHERE user_id=?", (user_id,)).fetchall()
+    conn.close()
+    if rows:
+        read_isbns = {r["isbn"].lower() for r in rows if r["isbn"]}
+        read_titles = {r["book_title"].lower().strip() for r in rows if r["book_title"]}
+        recs = [r for r in recs if
+                r["ISBN"].lower() not in read_isbns and
+                r["Book-Title"].lower().strip() not in read_titles]
+
+    return jsonify({"ok": True, "recs": recs[:12]})
 
 
 if __name__ == "__main__":
