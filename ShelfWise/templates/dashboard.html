@@ -114,7 +114,7 @@
     </div>
     <div id="statusRow"></div>
     <div class="loading" id="loadingRow" style="display:none;">
-      <div class="spinner"></div><div class="muted">Fetching recommendations...</div>
+      <div class="spinner"></div><div class="muted">Loading books... please wait a moment</div>
     </div>
 
     <div class="book-grid" id="bookGrid">
@@ -503,12 +503,16 @@ async function fetchMood(mood) {
   try {
     const data = await fetch(`/api/mood/${encodeURIComponent(mood)}`).then(r => r.json());
     if (!data.ok) throw new Error(data.error);
-    statusRow.innerHTML = `<div class="match-pill fade-in">Mood: <b>${esc(mood)}</b></div>`;
-    bookGrid.innerHTML  = data.recs.map(buildCard).join("");
-    emptyState.style.display = "none";
-    syncHearts();
+    if (!data.recs || data.recs.length === 0) {
+      statusRow.innerHTML = `<div class="inline-error">No results for this mood right now. Try another one.</div>`;
+    } else {
+      statusRow.innerHTML = `<div class="match-pill fade-in">Mood: <b>${esc(mood)}</b></div>`;
+      bookGrid.innerHTML  = data.recs.map(buildCard).join("");
+      emptyState.style.display = "none";
+      syncHearts();
+    }
   } catch (err) {
-    statusRow.innerHTML = `<div class="inline-error">${esc(err.message)}</div>`;
+    statusRow.innerHTML = `<div class="inline-error">Couldn't load mood picks — please try again.</div>`;
   } finally {
     loadingRow.style.display = "none";
   }

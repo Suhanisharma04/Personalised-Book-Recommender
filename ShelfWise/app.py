@@ -17,6 +17,9 @@ API_KEY = "AIzaSyBd0aX3yGoCg2yGF6ezXiq27RGEtIJntMU"
 BOOKS_URL = "https://www.googleapis.com/books/v1/volumes"
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app.db")
 
+# shared session keeps the connection alive between calls — much faster than opening new connections
+gb_session = requests.Session()
+
 
 def get_db():
     conn = sqlite3.connect(DB_PATH)
@@ -127,21 +130,16 @@ def parse_book(item):
 
 
 def get_recommendations(query, user_id=None):
-    # step 1 — build a pool of books by searching the query directly
-    # this is more reliable than finding one seed book and using its category
+    # single call — one reliable request instead of multiple sequential ones
+    # this avoids the situation where a slow google response causes everything to fail
     pool = []
-    for start in [0, 40]:
-        try:
-            r = requests.get(BOOKS_URL, params={
-                "q": query, "maxResults": 40,
-                "startIndex": start, "key": API_KEY
-            }, timeout=8)
-            batch = r.json().get("items", [])
-            pool += batch
-            if len(batch) < 40:
-                break
-        except Exception as e:
-            raise ValueError(f"Couldn't reach Google Books: {e}")
+    try:
+        r = gb_session.get(BOOKS_URL, params={
+            "q": query, "maxResults": 40, "key": API_KEY
+        }, timeout=12)
+        pool = r.json().get("items", [])
+    except Exception:
+        pass
 
     if not pool:
         raise ValueError(f"Couldn't find anything for '{query}'. Try a different title.")
@@ -152,26 +150,22 @@ def get_recommendations(query, user_id=None):
     matched_author = ", ".join(seed_info.get("authors", []))
 
     # basic validation — only check short queries (1-2 words) like random names/gibberish
-    # longer queries are almost always real book titles coming from the suggestion dropdown
     first_title = matched_title.lower()
     query_words = [w for w in query.lower().split() if len(w) > 2]
     if len(query.split()) <= 2 and query_words and not any(w in first_title for w in query_words):
-        raise ValueError(f"Couldn't find a book called '{query}'. Please enter a real book title.")
+        raise ValueError(f"Couldn't find '{query}'. Please enter a book title or keyword.")
 
-    if not matched_author:
-        raise ValueError(f"Couldn't find a book called '{query}'. Please enter a real book title.")
-
-    # step 2 — also add category-based results to widen the pool
+    # add category-based results to widen the pool — short timeout, truly optional
     categories = seed_info.get("categories", [])
     if categories:
         try:
             cat = categories[0].split("/")[0].strip()
-            r = requests.get(BOOKS_URL, params={
-                "q": f"subject:{cat}", "maxResults": 40, "key": API_KEY
-            }, timeout=8)
+            r = gb_session.get(BOOKS_URL, params={
+                "q": f"subject:{cat}", "maxResults": 20, "key": API_KEY
+            }, timeout=4)
             pool += r.json().get("items", [])
         except Exception:
-            pass
+            pass  # fine if this fails, we already have 40 books
 
     # step 3 — build dataframe and run tfidf
     df = pd.DataFrame([parse_book(i) for i in pool])
@@ -180,9 +174,10 @@ def get_recommendations(query, user_id=None):
     if len(df) < 2:
         raise ValueError(f"Not enough books found for '{query}'.")
 
+    # repeat title 3x and author 2x so tfidf treats them as more important than description
     df["search_text"] = (
-        df["Book-Title"].fillna("") + " " +
-        df["Book-Author"].fillna("") + " " +
+        (df["Book-Title"].fillna("") + " ") * 3 +
+        (df["Book-Author"].fillna("") + " ") * 2 +
         df["description"].fillna("")
     ).str.lower()
 
@@ -198,12 +193,19 @@ def get_recommendations(query, user_id=None):
     results = df.iloc[top].copy().reset_index(drop=True)
 
     # filter out books user already marked as read
+    # match by both isbn and title — isbn can differ between api calls for the same book
     if user_id:
         conn = get_db()
-        read = {r["isbn"] for r in conn.execute("SELECT isbn FROM user_already_read WHERE user_id=?", (user_id,)).fetchall()}
+        rows = conn.execute("SELECT isbn, book_title FROM user_already_read WHERE user_id=?", (user_id,)).fetchall()
         conn.close()
-        if read:
-            results = results[~results["ISBN"].isin(read)].reset_index(drop=True)
+        if rows:
+            read_isbns = {r["isbn"].lower() for r in rows if r["isbn"]}
+            read_titles = {r["book_title"].lower().strip() for r in rows if r["book_title"]}
+            mask = (
+                results["ISBN"].str.lower().isin(read_isbns) |
+                results["Book-Title"].str.lower().str.strip().isin(read_titles)
+            )
+            results = results[~mask].reset_index(drop=True)
 
     return matched_title, matched_author, results
 
@@ -382,7 +384,7 @@ def api_suggest():
     if len(q) < 2:
         return jsonify([])
     try:
-        res = requests.get(BOOKS_URL, params={"q": q, "maxResults": 6, "key": API_KEY}, timeout=4)
+        res = gb_session.get(BOOKS_URL, params={"q": q, "maxResults": 6, "key": API_KEY}, timeout=4)
         titles = []
         seen = set()
         for item in res.json().get("items", []):
@@ -481,7 +483,7 @@ def api_book_detail():
         ]
         items = []
         for query in searches:
-            res = requests.get(BOOKS_URL, params={"q": query, "maxResults": 1, "key": API_KEY}, timeout=5)
+            res = gb_session.get(BOOKS_URL, params={"q": query, "maxResults": 1, "key": API_KEY}, timeout=5)
             items = res.json().get("items", [])
             if items:
                 break
@@ -502,7 +504,7 @@ def api_book_detail():
         similar = []
         if author:
             try:
-                ar = requests.get(BOOKS_URL, params={"q": f"inauthor:{author}", "maxResults": 5, "key": API_KEY}, timeout=4)
+                ar = gb_session.get(BOOKS_URL, params={"q": f"inauthor:{author}", "maxResults": 5, "key": API_KEY}, timeout=4)
                 for item in ar.json().get("items", []):
                     i = item.get("volumeInfo", {})
                     if i.get("title", "").lower() != title.lower():
@@ -565,12 +567,25 @@ def api_mood(mood):
     if not query:
         return jsonify({"ok": False, "error": "Unknown mood."}), 400
     try:
-        res = requests.get(BOOKS_URL, params={"q": query, "maxResults": 12, "orderBy": "relevance", "key": API_KEY}, timeout=8)
+        res = gb_session.get(BOOKS_URL, params={"q": query, "maxResults": 12, "orderBy": "relevance", "key": API_KEY}, timeout=12)
         recs = [parse_book(item) for item in res.json().get("items", []) if item.get("volumeInfo", {}).get("title")]
-        return jsonify({"ok": True, "recs": recs})
+
+        # filter out books user already marked as read
+        user_id = session["user_id"]
+        conn = get_db()
+        rows = conn.execute("SELECT isbn, book_title FROM user_already_read WHERE user_id=?", (user_id,)).fetchall()
+        conn.close()
+        if rows:
+            read_isbns = {r["isbn"].lower() for r in rows if r["isbn"]}
+            read_titles = {r["book_title"].lower().strip() for r in rows if r["book_title"]}
+            recs = [r for r in recs if
+                    r["ISBN"].lower() not in read_isbns and
+                    r["Book-Title"].lower().strip() not in read_titles]
+
+        return jsonify({"ok": True, "recs": recs[:12]})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 502
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    app.run(debug=True, port=5000, threaded=True)
