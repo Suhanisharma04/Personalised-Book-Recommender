@@ -143,12 +143,22 @@ def parse_book(item):
 
 
 def fetch_pool_from_google(query):
-    # try up to 3 times with 30 second timeout each — guarantees a result on first click
-    for attempt in range(3):
+    # try 3 progressively simpler queries — each different so we don't retry the same thing
+    words = query.strip().split()
+    attempts = [
+        query,                          # full query e.g. "atomic habits james clear"
+        " ".join(words[:3]),            # first 3 words e.g. "atomic habits james"
+        words[0] if words else query,   # just first word e.g. "atomic"
+    ]
+    # remove duplicates while keeping order
+    seen = set()
+    unique_attempts = [a for a in attempts if a not in seen and not seen.add(a)]
+
+    for q in unique_attempts:
         try:
             r = gb_session.get(BOOKS_URL, params={
-                "q": query, "maxResults": 40, "key": API_KEY
-            }, timeout=30)
+                "q": q, "maxResults": 40, "key": API_KEY
+            }, timeout=20)
             items = r.json().get("items", [])
             if items:
                 return items
@@ -200,12 +210,6 @@ def get_recommendations(query, user_id=None):
         seed_info = pool[0].get("volumeInfo", {})
         matched_title = seed_info.get("title", query)
         matched_author = ", ".join(seed_info.get("authors", []))
-
-        # basic validation for short queries only
-        first_title = matched_title.lower()
-        query_words = [w for w in query.lower().split() if len(w) > 2]
-        if len(query.split()) <= 2 and query_words and not any(w in first_title for w in query_words):
-            raise ValueError(f"Couldn't find '{query}'. Please enter a book title or keyword.")
 
         # supplement with category books — optional, short timeout
         categories = seed_info.get("categories", [])
@@ -615,13 +619,13 @@ def api_mood(mood):
     if cached:
         recs = json.loads(cached["results_json"])
     else:
-        # not cached — try up to 3 times with 30 second timeout each
+        # not cached — try up to 2 times with 20 second timeout each
         recs = []
-        for attempt in range(3):
+        for attempt in range(2):
             try:
                 res = gb_session.get(BOOKS_URL, params={
                     "q": query, "maxResults": 12, "orderBy": "relevance", "key": API_KEY
-                }, timeout=30)
+                }, timeout=20)
                 items = res.json().get("items", [])
                 if items:
                     recs = [parse_book(item) for item in items if item.get("volumeInfo", {}).get("title")]
