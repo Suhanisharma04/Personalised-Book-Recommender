@@ -315,6 +315,9 @@ html[data-theme="night"] .heart-btn { background: rgba(20,10,34,0.35); }
   box-shadow: 0 8px 32px rgba(0,0,0,0.18);
   list-style: none; margin: 0; padding: 6px 0; z-index: 100; display: none;
 }
+html[data-theme="night"] .suggestions-dropdown {
+  background: #2D1B5E;
+}
 .suggest-item { padding: 10px 16px; cursor: pointer; font-size: 14px; color: var(--text); transition: background 120ms; }
 .suggest-item:hover { background: rgba(194,24,91,0.08); }
 
