@@ -18,7 +18,7 @@ API_KEY = "AIzaSyBd0aX3yGoCg2yGF6ezXiq27RGEtIJntMU"
 BOOKS_URL = "https://www.googleapis.com/books/v1/volumes"
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app.db")
 
-# shared session keeps the connection alive between calls — much faster than opening new connections
+# shared session keeps the connection alive
 gb_session = requests.Session()
 
 
@@ -143,14 +143,14 @@ def parse_book(item):
 
 
 def fetch_pool_from_google(query):
-    # try 3 progressively simpler queries — each different so we don't retry the same thing
+    # trying 3 simpler different queries
     words = query.strip().split()
     attempts = [
-        query,                          # full query e.g. "atomic habits james clear"
-        " ".join(words[:3]),            # first 3 words e.g. "atomic habits james"
-        words[0] if words else query,   # just first word e.g. "atomic"
+        query,
+        " ".join(words[:3]),
+        words[0] if words else query,
     ]
-    # remove duplicates while keeping order
+    # removing duplicates while keeping order
     seen = set()
     unique_attempts = [a for a in attempts if a not in seen and not seen.add(a)]
 
@@ -191,7 +191,7 @@ def run_tfidf(query, pool):
 def get_recommendations(query, user_id=None):
     cache_key = query.strip().lower()
 
-    # check cache first — return instantly if already searched before
+    # checking cache first but return instantly if already searched before
     conn = get_db()
     cached = conn.execute("SELECT results_json, matched_title, matched_author FROM search_cache WHERE query=?", (cache_key,)).fetchone()
     conn.close()
@@ -201,7 +201,7 @@ def get_recommendations(query, user_id=None):
         matched_title = cached["matched_title"]
         matched_author = cached["matched_author"]
     else:
-        # not cached — fetch from google with retry
+        # fetching from google if not cached
         pool = fetch_pool_from_google(query)
 
         if not pool:
@@ -211,7 +211,7 @@ def get_recommendations(query, user_id=None):
         matched_title = seed_info.get("title", query)
         matched_author = ", ".join(seed_info.get("authors", []))
 
-        # supplement with category books — optional, short timeout
+        # supplementing with category books
         categories = seed_info.get("categories", [])
         if categories:
             try:
@@ -228,7 +228,7 @@ def get_recommendations(query, user_id=None):
         if results is None:
             raise ValueError(f"Not enough books found for '{query}'.")
 
-        # save to cache so next search is instant
+        # saving to cache so next search is instant
         conn = get_db()
         conn.execute(
             "INSERT OR REPLACE INTO search_cache (query, results_json, matched_title, matched_author, cached_at) VALUES (?,?,?,?,?)",
@@ -237,7 +237,7 @@ def get_recommendations(query, user_id=None):
         conn.commit()
         conn.close()
 
-    # filter already-read books — done after cache so filter stays personal per user
+    # filtering already-read books after cached
     if user_id:
         conn = get_db()
         rows = conn.execute("SELECT isbn, book_title FROM user_already_read WHERE user_id=?", (user_id,)).fetchall()
@@ -473,21 +473,6 @@ def api_review():
     return jsonify({"ok": True})
 
 
-# delete a user's own review
-@app.route("/api/review/delete", methods=["POST"])
-@login_required
-def api_review_delete():
-    d = request.get_json() or {}
-    isbn = d.get("isbn", "").strip()
-    if not isbn:
-        return jsonify({"ok": False}), 400
-    conn = get_db()
-    conn.execute("DELETE FROM user_reviews WHERE user_id=? AND isbn=?", (session["user_id"], isbn))
-    conn.commit()
-    conn.close()
-    return jsonify({"ok": True})
-
-
 @app.route("/api/already_read", methods=["POST"])
 @login_required
 def api_already_read():
@@ -519,7 +504,7 @@ def api_book_detail():
         return jsonify({"ok": False}), 400
 
     try:
-        # try progressively looser searches until we find the book
+        # if strict search fails try just the title then fall back to plain search
         searches = [
             f"intitle:{title} inauthor:{author}",
             f"intitle:{title}",
@@ -611,7 +596,7 @@ def api_mood(mood):
     if not query:
         return jsonify({"ok": False, "error": "Unknown mood."}), 400
 
-    # check mood cache first — return instantly if already loaded before
+    # checking mood cache first and returns instantly if already loaded
     conn = get_db()
     cached = conn.execute("SELECT results_json FROM mood_cache WHERE mood=?", (mood.lower(),)).fetchone()
     conn.close()
@@ -619,7 +604,7 @@ def api_mood(mood):
     if cached:
         recs = json.loads(cached["results_json"])
     else:
-        # not cached — try up to 2 times with 20 second timeout each
+        # if not cached it tries up to 2 times with 20 seconds timeout
         recs = []
         for attempt in range(2):
             try:
@@ -636,7 +621,7 @@ def api_mood(mood):
         if not recs:
             return jsonify({"ok": False, "error": "Couldn't load mood picks. Please try again."}), 502
 
-        # save to cache so next click is instant
+        # saving to cache so next click is instant
         conn = get_db()
         conn.execute(
             "INSERT OR REPLACE INTO mood_cache (mood, results_json, cached_at) VALUES (?,?,?)",
@@ -645,7 +630,7 @@ def api_mood(mood):
         conn.commit()
         conn.close()
 
-    # filter already-read books
+    # filtering already-read books
     user_id = session["user_id"]
     conn = get_db()
     rows = conn.execute("SELECT isbn, book_title FROM user_already_read WHERE user_id=?", (user_id,)).fetchall()
